@@ -19,9 +19,11 @@ RUN pip3 install PySyncObj
 
 RUN mkdir /export && touch /export/blkdev && dd if=/dev/zero of=/export/blkdev bs=1k count=500
 
-ADD nbd.conf /etc/nbd-server/config
-ADD nbd_allow.conf /etc/nbd-server/allow
+ADD nbd/nbd.conf /etc/nbd-server/config
+ADD nbd/nbd_allow.conf /etc/nbd-server/allow
 
-ADD nbd.py /nbd.py
+ENV PYTHONPATH=/py
+RUN mkdir /py/
+ADD nbd /py/nbd
 
-ENTRYPOINT ["/nbd.py"]
+ENTRYPOINT ["python3", "-m", "nbd.server"]

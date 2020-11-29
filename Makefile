@@ -1,6 +1,6 @@
 .PHONY: nbd
 nbd:
-	docker build -t lambdascheme/nbd nbd
+	docker build -f nbd/Dockerfile -t lambdascheme/nbd .
 
 .PHONY: nbd
 nbd-push:

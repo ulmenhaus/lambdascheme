@@ -1,15 +1,14 @@
 #! /usr/local/bin/python3
 
-import collections
 import logging
 import os
 import random
 import socket
 import _thread
-import time
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+from nbd.iptr import NBDInterpreter, MagicValues
 from pysyncobj import SyncObj
 from pysyncobj.batteries import ReplCounter, ReplList
 from pysyncobj.syncobj import AsyncResult, replicated
@@ -17,100 +16,6 @@ from pysyncobj.syncobj import AsyncResult, replicated
 DEFAULT_BLOCK_SIZE = 512  # bytes
 DEFAULT_BLOCK_COUNT = (2**13)  # 4MiB
 DEFAULT_DEVICE_SIZE = DEFAULT_BLOCK_SIZE * DEFAULT_BLOCK_COUNT
-
-
-class MagicValues(object):
-    MinimalClientFlags = b"\x00\x00\x00\x01"  # set high NBD_FLAG_C_FIXED_NEWSTYLE
-    OptionRequestPrefix = b"IHAVEOPT"
-    OptionResponsePrefix = b"\x00\x03\xe8\x89\x04\x55\x65\xa9"
-    OptionsExportName = b"\x00\x00\x00\x01"
-    OptionUnsupported = b"\x80\x00\x00\x01"
-    RequestPrefix = b"\x25\x60\x95\x13"
-    RequestKindRead = b"\x00\x00"
-    RequestKindWrite = b"\x00\x01"
-    RequestKindClose = b"\x00\x02"
-    ResponsePrefix = b"\x67\x44\x66\x98"
-
-
-Option = collections.namedtuple("Option", ("kind", "data"))
-TransmissionRequest = collections.namedtuple(
-    "TransmissionRequest",
-    ("kind", "handle", "offset", "length", "data"),
-)
-
-
-class NBDInterpreter(object):
-    def __init__(self, cxn):
-        self._cxn = cxn
-        self._handshake()
-
-    def _handshake(self):
-        self._cxn.sendall(b"NBDMAGICIHAVEOPT")
-        self._cxn.sendall(b"\x00\x01")  # minimal set of handshake flags
-        client_flags = next_n_bytes(self._cxn, 4)
-        if client_flags != MagicValues.MinimalClientFlags:
-            raise ValueError("Unknown client flags: {}".format(client_flags))
-
-    def get_client_options(self):
-        # options
-        while True:
-            prefix = next_n_bytes(self._cxn, 8)
-            if prefix != MagicValues.OptionRequestPrefix:
-                raise ValueError(
-                    "Unknown prefix in client block: {}".format(prefix))
-            option = next_n_bytes(self._cxn, 4)
-            data_len = int.from_bytes(next_n_bytes(self._cxn, 4),
-                                      byteorder="big")
-            data = next_n_bytes(self._cxn, data_len)
-            yield Option(option, data)
-            if option == MagicValues.OptionsExportName:  # signals transition to transmission phase
-                break
-
-    def send_option_unsupported(self, option):
-        self._cxn.sendall(MagicValues.OptionResponsePrefix)
-        self._cxn.sendall(option.kind)
-        self._cxn.sendall(MagicValues.OptionUnsupported)
-        self._cxn.sendall(b"\x00" * 4)
-
-    def send_export_response(self, size=DEFAULT_DEVICE_SIZE):
-        self._cxn.sendall(size.to_bytes(byteorder="big", length=8))
-        # transmission flags
-        self._cxn.sendall(b"\x00\x01")
-        # Later versions of the nbd kernel module seem to ignore the zero padding even if NBD_OPT_GO
-        # is rejected so disabling for now
-        #
-        # zero padding
-        # self._cxn.sendall(b"\x00" * 124)
-
-    def get_transmission_requests(self):
-        while True:
-            prefix = next_n_bytes(self._cxn, 4)
-            if prefix == None:
-                break
-            if prefix != MagicValues.RequestPrefix:
-                raise ValueError("Unknown block prefix: {}".format(prefix))
-            flags = next_n_bytes(self._cxn, 2)
-            if flags != b"\x00\x00":
-                raise ValueError(
-                    "Didn't expect any flags for command but got: {}".format(
-                        flags))
-            req_type = next_n_bytes(self._cxn, 2)
-            handle = next_n_bytes(self._cxn, 8)
-            offset = int.from_bytes(next_n_bytes(self._cxn, 8),
-                                    byteorder="big")
-            length = int.from_bytes(next_n_bytes(self._cxn, 4),
-                                    byteorder="big")
-            data = None
-            if req_type == MagicValues.RequestKindWrite and length > 0:
-                data = next_n_bytes(self._cxn, length)
-            yield TransmissionRequest(req_type, handle, offset, length, data)
-
-    def send_transmission_response(self, handle, data=None):
-        self._cxn.sendall(MagicValues.ResponsePrefix)
-        self._cxn.sendall(b"\x00\x00\x00\x00")
-        self._cxn.sendall(handle)
-        if data:
-            self._cxn.sendall(data)
 
 
 def handle_cxn(cxn, blocks, volumes):
@@ -135,7 +40,7 @@ def handle_cxn(cxn, blocks, volumes):
         blocks.extend([b'\x00'] * DEFAULT_DEVICE_SIZE, **kwargs)
 
     voloffset = DEFAULT_DEVICE_SIZE * volumes.index(volume)
-    iptr.send_export_response()
+    iptr.send_export_response(DEFAULT_DEVICE_SIZE)
     logging.info("Entering transmission phase")
     for req in iptr.get_transmission_requests():
         if req.kind == MagicValues.RequestKindRead:
@@ -158,38 +63,6 @@ def handle_cxn(cxn, blocks, volumes):
             break
         else:
             raise ValueError("Unknown request type: {}".format(req.kind))
-
-
-def next_n_bytes(cxn, n):
-    data = b''
-    while len(data) < n:
-        packet = cxn.recv(n - len(data))
-        if not packet:
-            return None
-        data += packet
-    return data
-
-
-def main():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(('0.0.0.0', 2000))
-    sock.setblocking(True)
-    sock.listen(1)
-
-    # contains all blocks for all devices as a contiguous list of bytes
-    blocks = []
-    # a list of all devices so we know the starting offset of a given device in `blocks`
-    # (all devices are fixed size)
-    volumes = []
-
-    logging.info("NBD Server Starting...")
-    while True:
-        cxn, client = sock.accept()
-        logging.info("Connection accepted from client {}".format(client))
-        _thread.start_new_thread(handle_cxn, (cxn, blocks, volumes))
-        logging.info(
-            "Connection closed by client {} -- listening for next client".
-            format(client))
 
 
 class ReplBlocks(ReplList):
@@ -252,7 +125,10 @@ def main():
 
     peers = None if "NBDD_PEERS" not in os.environ else os.environ[
         "NBDD_PEERS"].split(",")
+    # contains all blocks for all devices as a contiguous list of bytes
     blocks = []
+    # a list of all devices so we know the starting offset of a given device in `blocks`
+    # (all devices are fixed size)
     volumes = []
     if peers:
         blocks = ReplBlocks()
