@@ -1,0 +1,26 @@
+version: "3.0"
+services:
+  # NOTE we could use 3 replicas of one service here but this gives us some
+  # more consistency in how the replicas are configured
+  nbd-1:
+    image: lambdascheme/nbd
+    environment:
+      NBDD_HOSTNAME: nbd-1
+      NBDD_PEERS: nbd-2,nbd-3
+
+  nbd-2:
+    image: lambdascheme/nbd
+    environment:
+      NBDD_HOSTNAME: nbd-2
+      NBDD_PEERS: nbd-1,nbd-3
+
+  nbd-3:
+    image: lambdascheme/nbd
+    environment:
+      NBDD_HOSTNAME: nbd-3
+      NBDD_PEERS: nbd-1,nbd-2
+
+networks:
+  default:
+    external:
+      name: mycloud
