@@ -1,24 +1,49 @@
 version: "3.0"
 services:
-  # NOTE we could use 3 replicas of one service here but this gives us some
-  # more consistency in how the replicas are configured
-  nbd-1:
+  nbd-lb:
+    deploy:
+      replicas: 3
+    image: lambdascheme/nbd
+    entrypoint: ["python3", "-m", "nbd.lb"]
+    environment:
+      NBD_SHARDS: '[["nbd-1-1", "nbd-1-2", "nbd-1-3"], ["nbd-2-1", "nbd-2-2", "nbd-2-3"]]'
+  # NOTE we could use 3 replicas of one service here with the magic {{.Task.Slot}}
+  # template value, but that will only work with Swarm, not standalone compose
+  nbd-1-1:
     image: lambdascheme/nbd
     environment:
-      NBDD_HOSTNAME: nbd-1
-      NBDD_PEERS: nbd-2,nbd-3
+      NBDD_HOSTNAME: nbd-1-1
+      NBDD_PEERS: nbd-1-2,nbd-1-3
 
-  nbd-2:
+  nbd-1-2:
     image: lambdascheme/nbd
     environment:
-      NBDD_HOSTNAME: nbd-2
-      NBDD_PEERS: nbd-1,nbd-3
+      NBDD_HOSTNAME: nbd-1-2
+      NBDD_PEERS: nbd-1-1,nbd-1-3
 
-  nbd-3:
+  nbd-1-3:
     image: lambdascheme/nbd
     environment:
-      NBDD_HOSTNAME: nbd-3
-      NBDD_PEERS: nbd-1,nbd-2
+      NBDD_HOSTNAME: nbd-1-3
+      NBDD_PEERS: nbd-1-1,nbd-1-2
+
+  nbd-2-1:
+    image: lambdascheme/nbd
+    environment:
+      NBDD_HOSTNAME: nbd-2-1
+      NBDD_PEERS: nbd-2-2,nbd-2-3
+
+  nbd-2-2:
+    image: lambdascheme/nbd
+    environment:
+      NBDD_HOSTNAME: nbd-2-2
+      NBDD_PEERS: nbd-2-1,nbd-2-3
+
+  nbd-2-3:
+    image: lambdascheme/nbd
+    environment:
+      NBDD_HOSTNAME: nbd-2-3
+      NBDD_PEERS: nbd-2-1,nbd-2-2
 
 networks:
   default:

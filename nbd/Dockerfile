@@ -19,8 +19,13 @@ RUN pip3 install PySyncObj
 
 RUN mkdir /export && touch /export/blkdev && dd if=/dev/zero of=/export/blkdev bs=1k count=500
 
+RUN apt-get install -y postgresql postgresql-contrib sudo hdparm && \
+    mkdir /mnt/pg && chown postgres /mnt/pg
+
 ADD nbd/nbd.conf /etc/nbd-server/config
 ADD nbd/nbd_allow.conf /etc/nbd-server/allow
+
+RUN touch /tmp/blocks
 
 ENV PYTHONPATH=/py
 RUN mkdir /py/

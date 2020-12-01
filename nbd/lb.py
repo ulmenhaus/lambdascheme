@@ -38,6 +38,7 @@ class NBDLoadBalancer(object):
                 logging.info("Ignoring client option: {}".format(opt.kind))
                 iptr.send_option_unsupported(opt)
         shard_ix = (hash(volume) % len(self.shards))
+        random.seed()
         replica = random.choice(self.shards[shard_ix])
         logging.info(
             "Sending client to replica {} shard {} for volume {}".format(
