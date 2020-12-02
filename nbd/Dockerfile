@@ -15,7 +15,7 @@ FROM python:3
 #   disconnect with nbd-client -disconnect /dev/nbd0 -nonetlink
 RUN apt-get update && apt-get install -y vim kmod nbd-server nbd-client
 
-RUN pip3 install PySyncObj
+RUN pip3 install PySyncObj jaeger-client
 
 RUN mkdir /export && touch /export/blkdev && dd if=/dev/zero of=/export/blkdev bs=1k count=500
 

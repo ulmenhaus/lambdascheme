@@ -14,36 +14,47 @@ services:
     environment:
       NBDD_HOSTNAME: nbd-1-1
       NBDD_PEERS: nbd-1-2,nbd-1-3
+      JAEGER_AGENT_HOST: jaeger
 
   nbd-1-2:
     image: lambdascheme/nbd
     environment:
       NBDD_HOSTNAME: nbd-1-2
       NBDD_PEERS: nbd-1-1,nbd-1-3
+      JAEGER_AGENT_HOST: jaeger
 
   nbd-1-3:
     image: lambdascheme/nbd
     environment:
       NBDD_HOSTNAME: nbd-1-3
       NBDD_PEERS: nbd-1-1,nbd-1-2
+      JAEGER_AGENT_HOST: jaeger
 
   nbd-2-1:
     image: lambdascheme/nbd
     environment:
       NBDD_HOSTNAME: nbd-2-1
       NBDD_PEERS: nbd-2-2,nbd-2-3
+      JAEGER_AGENT_HOST: jaeger
 
   nbd-2-2:
     image: lambdascheme/nbd
     environment:
       NBDD_HOSTNAME: nbd-2-2
       NBDD_PEERS: nbd-2-1,nbd-2-3
+      JAEGER_AGENT_HOST: jaeger
 
   nbd-2-3:
     image: lambdascheme/nbd
     environment:
       NBDD_HOSTNAME: nbd-2-3
       NBDD_PEERS: nbd-2-1,nbd-2-2
+      JAEGER_AGENT_HOST: jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:0.8.0
+    ports:
+      - 16686:16686 
 
 networks:
   default:

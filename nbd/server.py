@@ -9,6 +9,8 @@ import threading
 import time
 import uuid
 
+import jaeger_client
+
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from nbd.iptr import NBDInterpreter, MagicValues, next_n_bytes
@@ -22,7 +24,7 @@ DEFAULT_BLOCK_COUNT = (2**20)  # 512MiB
 DEFAULT_DEVICE_SIZE = DEFAULT_BLOCK_SIZE * DEFAULT_BLOCK_COUNT
 
 
-def handle_cxn(cxn, blocks, volumes):
+def handle_cxn(cxn, blocks, volumes, tracer):
     iptr = NBDInterpreter(cxn)
     volume = None
     for opt in iptr.get_client_options():
@@ -63,7 +65,8 @@ def handle_cxn(cxn, blocks, volumes):
             logging.info("Writing bytes {} - {} of {}".format(
                 req.offset, req.offset + req.length, volume.decode("utf-8")))
             start = voloffset + req.offset
-            blocks.lead_write(start, req.data)
+            with tracer.start_span('write-all-replicas'):
+                blocks.lead_write(start, req.data)
             # blocks[start:start + req.length] = [
             #     b.to_bytes(byteorder="big", length=1) for b in req.data
             # ]
@@ -264,6 +267,17 @@ def main():
     # (all devices are fixed size)
     volumes = []
 
+    tracer = jaeger_client.Config(
+        config={
+            'sampler': {
+                'type': 'const',
+                'param': 1,
+            },
+            'logging': True,
+        },
+        service_name='nbd',
+    ).initialize_tracer()
+
     if peers:
         LocalState.f = open('/tmp/blocks', 'r+b')
         write_cache = LoglessCache()
@@ -297,7 +311,7 @@ def main():
     while True:
         cxn, client = sock.accept()
         logging.info("Connection accepted from client {}".format(client))
-        _thread.start_new_thread(handle_cxn, (cxn, blocks, volumes))
+        _thread.start_new_thread(handle_cxn, (cxn, blocks, volumes, tracer))
         logging.info(
             "Connection closed by client {} -- listening for next client".
             format(client))
